@@ -1,9 +1,10 @@
 from apps import navigation
-from dash import html, Input, Output, State, dcc
+from dash import html, Input, Output, State, dcc, no_update
 import dash_bootstrap_components as dbc
 import dash
 import base64
 import requests
+import flask
 
 # Register page
 dash.register_page(__name__, path='/jd_skills', title="Short Listing App", description="summary", image="assets/logo.png")
@@ -179,13 +180,16 @@ loading_wrapper = dcc.Loading(
 
 ############################ Layout##########################
 layout = html.Div([
+    dcc.Location(id="jd-url", refresh=True),
     navigation.navbar,
     text_content,
     step_1_jd,
     step_2_skills,
-    text_content2 , cv_uploader , process_button ,loading_wrapper
-   
-  
+    text_content2 , cv_uploader , process_button ,
+    html.Div(id='process-status', className="text-center"),
+    loading_wrapper
+
+
 ], style={
     'position': 'absolute',
     'top': 0,
@@ -200,6 +204,16 @@ layout = html.Div([
 })
 
 ####################################################################### api integration  ###################################################################
+# Guard: bounce to login if there's no session token
+@dash.callback(
+    Output('jd-url', 'pathname'),
+    Input('jd-url', 'pathname'),
+)
+def guard_jd_skills(_pathname):
+    if not flask.session.get('token'):
+        return '/'
+    return no_update
+
 # Callback to handle file upload and update messages and table rows
 @dash.callback(
     Output('upload-message', 'children'),
@@ -212,9 +226,9 @@ def update_upload_message(filenames):
             html.Ul([html.Li(filename) for filename in filenames])
         ])
     return ""
-# call back to handle process text api and link generation 
+# call back to handle process text api and link generation
 @dash.callback(
-    Output('resume-table-body', 'children'),
+    [Output('resume-table-body', 'children'), Output('process-status', 'children')],
     [Input('process-button', 'n_clicks')],
     [State('jd', 'value'),
      State('skills', 'value'),
@@ -223,7 +237,11 @@ def update_upload_message(filenames):
 )
 def process_files(n_clicks, jd, skills, filenames, contents):
     if n_clicks is None:
-        return []
+        return [], ""
+
+    token = flask.session.get('token')
+    if not token:
+        return [], dbc.Alert("Please log in to process resumes.", color="warning")
 
     files = []
     if filenames and contents:
@@ -238,46 +256,37 @@ def process_files(n_clicks, jd, skills, filenames, contents):
         'job_description': jd,
         'skills': skills
     }
-    response = requests.post('http://localhost:8000/process_text', data=data, files=files)
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.post('http://localhost:8000/process_text', data=data, files=files, headers=headers)
 
-    if response.status_code == 200:
-        # Extract data from JSON response
-        response_json = response.json()
-        result = response_json.get("result", "")
+    if response.status_code == 401:
+        return [], dbc.Alert("Your session has expired. Please log in again.", color="danger")
 
-        # Split the result by "- Candidate's name:" to handle multiple candidates
-        candidates = result.split("- Candidate's name:")
-        table_rows = []
+    if response.status_code != 200:
+        return [], dbc.Alert(f"Error: {response.status_code} - {response.text}", color="danger")
 
-        # Generate resume links
-        resume_links = [f"http://localhost:8000/files/{filename}" for filename in filenames]
+    run = response.json()
+    candidates = run.get("results", [])
 
-       
-        for candidate_index, candidate in enumerate(candidates[1:]):
-            lines = candidate.strip().split('\n')
-            candidate_name = lines[0].strip()
-            percentage_score = lines[1].split(": ", 1)[1]
-            based_on_percentage = lines[2].split(": ", 1)[1]
-            important_things = lines[3].split(": ", 1)[1]
-            risk_factor = lines[4].split(": ", 1)[1]
+    # Generate resume links
+    resume_links = [f"http://localhost:8000/files/{filename}" for filename in (filenames or [])]
 
-            if candidate_index < len(resume_links):
-                resume_link = html.A(filenames[candidate_index], href=resume_links[candidate_index], target="_blank")
-            else:
-                resume_link = "No resume link available"
+    table_rows = []
+    for candidate_index, cand in enumerate(candidates):
+        if candidate_index < len(resume_links):
+            resume_link = html.A(filenames[candidate_index], href=resume_links[candidate_index], target="_blank")
+        else:
+            resume_link = "No resume link available"
 
-            # Create table row
-            row = html.Tr([
-                html.Td(candidate_name),
-                html.Td(resume_link),
-                html.Td(based_on_percentage),
-                html.Td(percentage_score),
-                html.Td(important_things),
-                html.Td(risk_factor)
-            ])
-            table_rows.append(row)
+        # Create table row
+        row = html.Tr([
+            html.Td(cand["candidate_name"]),
+            html.Td(resume_link),
+            html.Td("Yes" if cand["shortlisted"] else "No"),
+            html.Td(f'{cand["match_score"]}%'),
+            html.Td(cand["highlights"]),
+            html.Td(cand["risk_factor"])
+        ])
+        table_rows.append(row)
 
-        return table_rows
-
-    else:
-        return f"Error: {response.status_code} - {response.text}", []
+    return table_rows, ""

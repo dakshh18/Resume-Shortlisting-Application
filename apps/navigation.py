@@ -32,6 +32,7 @@ navbar = dbc.Navbar(
                     dbc.Nav([
                         dbc.NavItem(dbc.NavLink("Account",href="/")),
                         dbc.NavItem(dbc.NavLink("Short List Resumes ",href="/jd_skills")),
+                        dbc.NavItem(dbc.NavLink("Past Runs",href="/history")),
                         # dbc.NavItem(dbc.NavLink("Upload Resume",href="/upload_cv")),
                     ],navbar=True)
                 ],width={"size":"auto"})

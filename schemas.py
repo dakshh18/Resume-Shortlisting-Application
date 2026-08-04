@@ -1,5 +1,7 @@
-from pydantic import BaseModel, EmailStr, field_validator 
+from pydantic import BaseModel, EmailStr, field_validator
 import re
+import datetime
+from typing import List
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -48,6 +50,29 @@ class Skills(BaseModel):
 class UploadFileResponse(BaseModel):
     filename: str
     content_type: str
+
+    class Config:
+        orm_mode = True
+
+################
+
+class AnalysisResultOut(BaseModel):
+    id: int
+    candidate_name: str
+    match_score: int
+    shortlisted: bool
+    highlights: str
+    risk_factor: str
+
+    class Config:
+        orm_mode = True
+
+class AnalysisRunOut(BaseModel):
+    id: int
+    job_description: str
+    skills: str
+    created_at: datetime.datetime
+    results: List[AnalysisResultOut] = []
 
     class Config:
         orm_mode = True

@@ -1,15 +1,15 @@
 from sqlalchemy.orm import Session
 import models, schemas, crud, database
 from fastapi import FastAPI, HTTPException, Depends , File , UploadFile , Form
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import datetime
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Security
 from typing import List
 from schemas import JobDescription, Skills, UploadFileResponse
 import shutil
 import os
 from langchain_backend import process_with_langchain
-from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
@@ -31,6 +31,29 @@ def create_access_token(data: dict, expires_delta: datetime.timedelta = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
     return encoded_jwt
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
+    db: Session = Depends(database.get_db),
+) -> models.User:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=["HS256"])
+        email = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired, please log in again")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+
+    user = crud.get_user_by_email(db, email=email)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 #####################################  API for sign up ###################################
 @app.post("/signup/", response_model=schemas.User)
@@ -77,15 +100,27 @@ def get_file(filename: str):
         raise HTTPException(status_code=404, detail="File not found")
 
 #################################### API  for langchain response part #########################
-@app.post("/process_text")
+@app.post("/process_text", response_model=schemas.AnalysisRunOut)
 async def process_text(
     job_description: str = Form(...),
     skills: str = Form(...),
-    files: List[UploadFile] = File(...)
-) -> JSONResponse:
+    files: List[UploadFile] = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="You can upload up to 10 files only")
 
-    files = [await file.read() for file in files]
-    result = process_with_langchain(job_description, skills, files)
-    return JSONResponse(content=result)
+    file_bytes = [await file.read() for file in files]
+    candidates = process_with_langchain(job_description, skills, file_bytes)
+    return crud.create_analysis_run(
+        db, owner_id=current_user.id, job_description=job_description, skills=skills, candidates=candidates
+    )
+
+#################################### API for past shortlisting runs ###########################
+@app.get("/history", response_model=List[schemas.AnalysisRunOut])
+def get_history(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(database.get_db),
+):
+    return crud.get_analysis_runs_by_owner(db, owner_id=current_user.id)

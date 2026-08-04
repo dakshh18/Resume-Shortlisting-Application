@@ -1,10 +1,9 @@
 from langchain.prompts import PromptTemplate
-from langchain.chains.llm import LLMChain
-from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import CharacterTextSplitter
 import fitz  # PyMuPDF
 from typing import List
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 import os
 from dotenv import load_dotenv
 
@@ -13,20 +12,37 @@ load_dotenv()
 # Initialize the OpenAI LLM
 llm = ChatOpenAI(model="gpt-4",
                 openai_api_key=os.getenv("OPENAI_API_KEY"),
-                temperature=0 ,
-                streaming=True,
+                temperature=0,
                )
+
+class CandidateResult(BaseModel):
+    candidate_name: str = Field(description="Candidate's full name as it appears in the resume")
+    match_score: int = Field(ge=0, le=100, description="Percentage match between the resume and the job description/skills")
+    shortlisted: bool = Field(description="True if match_score is above 65, otherwise False")
+    highlights: str = Field(description="One-line summary of important things: years of experience, qualifications")
+    risk_factor: str = Field(description="One-line risk factor, e.g. job changes within two years; 'None noted' if none")
+
+class CandidateAnalysisBatch(BaseModel):
+    candidates: List[CandidateResult] = Field(
+        default_factory=list,
+        description="One entry per distinct candidate resume found in the text; empty if none found",
+    )
 
 # Define the prompt template for ranking skills
 prompt_template = PromptTemplate(
     input_variables=["job_description", "skills", "resume_text"],
     template="""
-      Given the following job description, skills, and resume, do the following:
-      1. Act like a skilled or very experienced ATS (Application Tracking System) with a deep understanding of the tech field, software engineering, data science, data analysis, and big data engineering. Evaluate the resume based on the given job description and skills.
-      2. Assign a percentage matching score based on the job description and skills with very high accuracy.
-      3. Display a 'Yes' message if the resume score is above 65%, otherwise display a 'No' message.
-      4. Search within the resume for important things about the candidate, such as years of experience and qualifications.
-      5. Search within the resume for risk factors, such as job changes within two years.
+      You are a skilled and experienced ATS (Application Tracking System) with a deep understanding of the tech field, software engineering, data science, data analysis, and big data engineering.
+
+      The resume text below may contain ONE candidate, MULTIPLE candidates concatenated together, or NO resume content at all.
+      For each distinct candidate you can identify, evaluate them against the job description and skills and add one entry to `candidates` with:
+        - candidate_name
+        - match_score: percentage match (0-100), judged with high accuracy
+        - shortlisted: true if match_score is above 65, otherwise false
+        - highlights: one line covering years of experience and qualifications
+        - risk_factor: one line noting risk factors such as job changes within two years ("None noted" if none)
+
+      If the text contains no identifiable resume content, return an empty candidates list.
 
       Job Description:
       {job_description}
@@ -34,19 +50,15 @@ prompt_template = PromptTemplate(
       Skills:
       {skills}
 
-      Resume:
+      Resume Text:
       {resume_text}
-
-    So my final output should look like:
-        - Candidate's name
-        - Percentage matching score
-        - Based on percentage: Yes/No
-        - Important things in 1 line
-        - Risk factor
     """
 )
 
-def process_with_langchain(job_description: str, skills: str, pdf_files: List[bytes]):
+structured_llm = llm.with_structured_output(CandidateAnalysisBatch, method="function_calling")
+analysis_chain = prompt_template | structured_llm
+
+def process_with_langchain(job_description: str, skills: str, pdf_files: List[bytes]) -> List[CandidateResult]:
     all_texts = []
     for file_bytes in pdf_files:
         pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
@@ -72,12 +84,13 @@ def process_with_langchain(job_description: str, skills: str, pdf_files: List[by
     if current_text:
         combined_texts.append(current_text)
 
-    results = []
+    all_candidates: List[CandidateResult] = []
     for chunk in combined_texts:
-        chain = LLMChain(prompt=prompt_template, llm=llm, output_parser=StrOutputParser())
-        result = chain.invoke(input={"job_description": job_description, "skills": skills, "resume_text": chunk})
-        result_str = result["text"] if isinstance(result, dict) and "text" in result else str(result)
-        results.append(result_str)
+        batch: CandidateAnalysisBatch = analysis_chain.invoke({
+            "job_description": job_description,
+            "skills": skills,
+            "resume_text": chunk,
+        })
+        all_candidates.extend(batch.candidates)
 
-    aggregated_result = "\n".join(results)
-    return {"result": aggregated_result}
+    return all_candidates
