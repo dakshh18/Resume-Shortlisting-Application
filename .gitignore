@@ -1,0 +1,13 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# database & uploads
+database.db
+uploaded_files/
+files/

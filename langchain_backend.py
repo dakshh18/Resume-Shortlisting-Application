@@ -5,10 +5,14 @@ from langchain_text_splitters import CharacterTextSplitter
 import fitz  # PyMuPDF
 from typing import List
 from langchain_openai import ChatOpenAI
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize the OpenAI LLM
 llm = ChatOpenAI(model="gpt-4",
-                openai_api_key="***REMOVED-OPENAI-KEY***",
+                openai_api_key=os.getenv("OPENAI_API_KEY"),
                 temperature=0 ,
                 streaming=True,
                )

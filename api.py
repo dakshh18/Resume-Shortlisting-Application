@@ -9,10 +9,13 @@ from schemas import JobDescription, Skills, UploadFileResponse
 import shutil
 import os
 from langchain_backend import process_with_langchain
-from fastapi.responses import JSONResponse 
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 
-SECRET_KEY = "***REMOVED-SECRET-KEY***"
+load_dotenv()
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 
 models.Base.metadata.create_all(bind=database.engine)
 

@@ -4,19 +4,21 @@ import dash_bootstrap_components as dbc
 from dash import html,Input,Output
 import dash_uploader as du
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
 app = dash.Dash(__name__,
                 use_pages=True,
-                external_stylesheets=[dbc.themes.MORPH,dbc.icons.BOOTSTRAP],     
+                external_stylesheets=[dbc.themes.MORPH,dbc.icons.BOOTSTRAP],
                 suppress_callback_exceptions=True,
-              
-          
+
+
                 )
-                    
+
 
 server = app.server
-server.secret_key = '***REMOVED-SECRET-KEY***'
+server.secret_key = os.getenv("JWT_SECRET_KEY")
 
 UPLOAD_FOLDER_ROOT = os.path.join(os.path.dirname(__file__),"uploads")
 du.configure_upload(app,UPLOAD_FOLDER_ROOT)

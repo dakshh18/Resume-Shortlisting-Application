@@ -6,9 +6,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import CharacterTextSplitter
 import io
 import fitz  # PyMuPDF
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize the OpenAI LLM
-llm = ChatOpenAI(model="gpt-4", openai_api_key="***REMOVED-OPENAI-KEY***",temperature=0)
+llm = ChatOpenAI(model="gpt-4", openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
 
 # Define the prompt template for ranking skills
 prompt_template = PromptTemplate(
